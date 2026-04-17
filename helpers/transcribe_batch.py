@@ -1,12 +1,14 @@
 """Batch-transcribe every video in a directory with 4 parallel workers.
 
-Walks <videos_dir> for common video extensions, runs ElevenLabs Scribe on
-each, writes transcripts to <videos_dir>/edit/transcripts/<name>.json.
+Walks <videos_dir> for common video extensions, transcribes each with local
+faster-whisper by default (ElevenLabs via --remote), and writes transcripts to
+<videos_dir>/edit/transcripts/<name>.json.
 
 Cached per-file: any source that already has a transcript is skipped.
 
 Usage:
     python helpers/transcribe_batch.py <videos_dir>
+    python helpers/transcribe_batch.py <videos_dir> --remote
     python helpers/transcribe_batch.py <videos_dir> --workers 4
     python helpers/transcribe_batch.py <videos_dir> --num-speakers 2
     python helpers/transcribe_batch.py <videos_dir> --edit-dir /custom/edit
@@ -20,7 +22,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from transcribe import load_api_key, transcribe_one
+from transcribe import load_api_key, transcribe_remote
+from transcribe_local import get_model, transcribe_one as transcribe_local_one
 
 
 VIDEO_EXTS = {".mp4", ".MP4", ".mov", ".MOV", ".mkv", ".MKV", ".avi", ".AVI", ".m4v"}
@@ -35,8 +38,13 @@ def find_videos(videos_dir: Path) -> list[Path]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Parallel batch transcription of a videos directory")
+    ap = argparse.ArgumentParser(description="Parallel batch transcription of a videos directory (local by default)")
     ap.add_argument("videos_dir", type=Path, help="Directory containing source videos")
+    ap.add_argument(
+        "--remote",
+        action="store_true",
+        help="Use ElevenLabs Scribe instead of local faster-whisper",
+    )
     ap.add_argument(
         "--edit-dir",
         type=Path,
@@ -54,7 +62,7 @@ def main() -> None:
         "--num-speakers",
         type=int,
         default=None,
-        help="Optional number of speakers. Improves diarization when known.",
+        help="Optional number of speakers (ElevenLabs only). Improves diarization when known.",
     )
     args = ap.parse_args()
 
@@ -77,25 +85,45 @@ def main() -> None:
         print("nothing to do")
         return
 
-    api_key = load_api_key()
+    api_key: str | None = None
+    model = None
+    if args.remote:
+        api_key = load_api_key()
+    else:
+        print("loading local faster-whisper small model...")
+        model = get_model()
 
     print(f"transcribing {len(pending)} files with {args.workers} parallel workers")
     t0 = time.time()
 
     errors: list[tuple[Path, str]] = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {
-            pool.submit(
-                transcribe_one,
-                video=v,
-                edit_dir=edit_dir,
-                api_key=api_key,
-                language=args.language,
-                num_speakers=args.num_speakers,
-                verbose=False,
-            ): v
-            for v in pending
-        }
+        if args.remote:
+            futures = {
+                pool.submit(
+                    transcribe_remote,
+                    video=v,
+                    edit_dir=edit_dir,
+                    api_key=api_key,
+                    language=args.language,
+                    num_speakers=args.num_speakers,
+                    verbose=False,
+                ): v
+                for v in pending
+            }
+        else:
+            futures = {
+                pool.submit(
+                    transcribe_local_one,
+                    video=v,
+                    edit_dir=edit_dir,
+                    model=model,
+                    language=args.language,
+                    verbose=False,
+                ): v
+                for v in pending
+            }
+
         for fut in as_completed(futures):
             v = futures[fut]
             try:

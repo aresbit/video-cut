@@ -1,13 +1,16 @@
-"""Transcribe a video with ElevenLabs Scribe.
+"""Transcribe a video.
 
-Extracts mono 16kHz audio via ffmpeg, uploads to Scribe with verbatim +
-diarize + audio events + word-level timestamps, writes the full response
-to <edit_dir>/transcripts/<video_stem>.json.
+Default: local faster-whisper (small model, free, no API key needed).
+Fallback / override: ElevenLabs Scribe via --remote.
 
-Cached: if the output file already exists, the upload is skipped.
+Extracts mono 16kHz audio via ffmpeg, transcribes with word-level timestamps,
+and writes the response to <edit_dir>/transcripts/<video_stem>.json.
+
+Cached: if the output file already exists, the upload/transcription is skipped.
 
 Usage:
     python helpers/transcribe.py <video_path>
+    python helpers/transcribe.py <video_path> --remote
     python helpers/transcribe.py <video_path> --edit-dir /custom/edit
     python helpers/transcribe.py <video_path> --language en
     python helpers/transcribe.py <video_path> --num-speakers 2
@@ -25,6 +28,8 @@ import time
 from pathlib import Path
 
 import requests
+
+from transcribe_local import get_model, transcribe_one as transcribe_local_one
 
 
 SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text"
@@ -87,7 +92,7 @@ def call_scribe(
     return resp.json()
 
 
-def transcribe_one(
+def transcribe_remote(
     video: Path,
     edit_dir: Path,
     api_key: str,
@@ -95,10 +100,6 @@ def transcribe_one(
     num_speakers: int | None = None,
     verbose: bool = True,
 ) -> Path:
-    """Transcribe a single video. Returns path to transcript JSON.
-
-    Cached: returns existing path immediately if the transcript already exists.
-    """
     transcripts_dir = edit_dir / "transcripts"
     transcripts_dir.mkdir(parents=True, exist_ok=True)
     out_path = transcripts_dir / f"{video.stem}.json"
@@ -117,7 +118,7 @@ def transcribe_one(
         extract_audio(video, audio)
         size_mb = audio.stat().st_size / (1024 * 1024)
         if verbose:
-            print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
+            print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB) to ElevenLabs Scribe", flush=True)
         payload = call_scribe(audio, api_key, language, num_speakers)
 
     out_path.write_text(json.dumps(payload, indent=2))
@@ -133,8 +134,13 @@ def transcribe_one(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Transcribe a video with ElevenLabs Scribe")
+    ap = argparse.ArgumentParser(description="Transcribe a video (local whisper by default)")
     ap.add_argument("video", type=Path, help="Path to video file")
+    ap.add_argument(
+        "--remote",
+        action="store_true",
+        help="Use ElevenLabs Scribe instead of local faster-whisper",
+    )
     ap.add_argument(
         "--edit-dir",
         type=Path,
@@ -151,7 +157,7 @@ def main() -> None:
         "--num-speakers",
         type=int,
         default=None,
-        help="Optional number of speakers when known. Improves diarization accuracy.",
+        help="Optional number of speakers (ElevenLabs only). Improves diarization accuracy.",
     )
     args = ap.parse_args()
 
@@ -160,15 +166,24 @@ def main() -> None:
         sys.exit(f"video not found: {video}")
 
     edit_dir = (args.edit_dir or (video.parent / "edit")).resolve()
-    api_key = load_api_key()
 
-    transcribe_one(
-        video=video,
-        edit_dir=edit_dir,
-        api_key=api_key,
-        language=args.language,
-        num_speakers=args.num_speakers,
-    )
+    if args.remote:
+        api_key = load_api_key()
+        transcribe_remote(
+            video=video,
+            edit_dir=edit_dir,
+            api_key=api_key,
+            language=args.language,
+            num_speakers=args.num_speakers,
+        )
+    else:
+        model = get_model()
+        transcribe_local_one(
+            video=video,
+            edit_dir=edit_dir,
+            model=model,
+            language=args.language,
+        )
 
 
 if __name__ == "__main__":

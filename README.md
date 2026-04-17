@@ -27,11 +27,15 @@ cd video-use
 ln -s "$(pwd)" ~/.claude/skills/video-use
 
 # 2. Install deps
-pip install -e .
-brew install ffmpeg           # required
-brew install yt-dlp            # optional, for downloading online sources
+uv venv
+uv pip install -e .
+# or: pip install -e .
 
-# 3. Add your ElevenLabs API key
+# ffmpeg is required; yt-dlp is optional for downloading online sources
+# macOS: brew install ffmpeg yt-dlp
+# Ubuntu: sudo apt install ffmpeg && pip install yt-dlp
+
+# 3. (Optional) Add ElevenLabs API key if you want to use remote Scribe
 cp .env.example .env
 $EDITOR .env                   # ELEVENLABS_API_KEY=...
 ```
@@ -57,7 +61,7 @@ The LLM never watches the video. It **reads** it — through two layers that tog
   <img src="static/timeline-view.svg" alt="timeline_view composite — filmstrip + speaker track + waveform + word labels + silence-gap cut candidates" width="100%">
 </p>
 
-**Layer 1 — Audio transcript (always loaded).** One ElevenLabs Scribe call per source gives word-level timestamps, speaker diarization, and audio events (`(laughter)`, `(applause)`, `(sigh)`). All takes pack into a single ~12KB `takes_packed.md` — the LLM's primary reading view.
+**Layer 1 — Audio transcript (always loaded).** Local faster-whisper (`small`) by default; optional ElevenLabs Scribe (`--remote`) for higher accuracy and speaker diarization. Both give word-level timestamps so all takes pack into a single ~12KB `takes_packed.md` — the LLM's primary reading view.
 
 ```
 ## C0103  (duration: 43.0s, 8 phrases)

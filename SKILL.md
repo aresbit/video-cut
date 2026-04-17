@@ -57,9 +57,10 @@ The skill lives in `video-use/`. User footage lives wherever they put it. All se
 
 ## Setup
 
-- `ELEVENLABS_API_KEY` in `.env` at project root or env. Ask and write `.env` if missing.
-- `ffmpeg` + `ffprobe` on PATH.
-- Python deps: `pip install -e .`.
+- `ffmpeg` + `ffprobe` on PATH (required).
+- Python deps: `uv pip install -e .` or `pip install -e .` (required).
+- Transcription is **local-first** with faster-whisper `small` — free, no API key needed.
+- Optional remote: `ELEVENLABS_API_KEY` in `.env` for ElevenLabs Scribe (`--remote`). Ask and write `.env` only if the user explicitly wants remote transcription.
 - `yt-dlp`, `manim`, Remotion installed only on first use.
 - This skill vendors `skills/manim-video/`. Read its SKILL.md when building a Manim slot.
 
